@@ -18,6 +18,7 @@
 package org.photonvision.common.configuration;
 
 import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -28,15 +29,12 @@ import org.photonvision.common.logging.LogGroup;
 import org.photonvision.common.logging.LogLevel;
 import org.photonvision.common.logging.Logger;
 import org.photonvision.common.util.TestUtils;
+import org.photonvision.common.util.file.JacksonUtils;
 import org.photonvision.vision.pipeline.ColoredShapePipelineSettings;
 import org.photonvision.vision.pipeline.ReflectivePipelineSettings;
 import org.photonvision.vision.target.TargetModel;
 
 public class ConfigTest {
-
-    static {
-        TestUtils.loadLibraries();
-    }
 
     private static ConfigManager configMgr;
     private static final CameraConfiguration cameraConfig =
@@ -48,13 +46,15 @@ public class ConfigTest {
     public static void init() {
         TestUtils.loadLibraries();
         configMgr = new ConfigManager(Path.of("testconfigdir"));
+        configMgr.load();
+
         Logger.setLevel(LogGroup.General, LogLevel.TRACE);
 
         REFLECTIVE_PIPELINE_SETTINGS = new ReflectivePipelineSettings();
         COLORED_SHAPE_PIPELINE_SETTINGS = new ColoredShapePipelineSettings();
 
         REFLECTIVE_PIPELINE_SETTINGS.pipelineNickname = "2019Tape";
-        REFLECTIVE_PIPELINE_SETTINGS.targetModel = TargetModel.get2019Target();
+        REFLECTIVE_PIPELINE_SETTINGS.targetModel = TargetModel.k2019DualTarget;
 
         COLORED_SHAPE_PIPELINE_SETTINGS.pipelineNickname = "2019Cargo";
         COLORED_SHAPE_PIPELINE_SETTINGS.pipelineIndex = 1;
@@ -65,7 +65,7 @@ public class ConfigTest {
 
     @Test
     @Order(1)
-    public void serializeConfig() throws IOException {
+    public void serializeConfig() {
         TestUtils.loadLibraries();
 
         Logger.setLevel(LogGroup.General, LogLevel.TRACE);
@@ -79,9 +79,6 @@ public class ConfigTest {
                                 .toString());
         Assertions.assertTrue(camConfDir.exists(), "TestCamera config folder not found!");
 
-        Assertions.assertTrue(
-                Files.exists(Path.of(configMgr.configDirectoryFile.toString(), "hardwareConfig.json")),
-                "hardwareConfig.json file not found!");
         Assertions.assertTrue(
                 Files.exists(Path.of(configMgr.configDirectoryFile.toString(), "networkSettings.json")),
                 "networkSettings.json file not found!");
@@ -117,5 +114,17 @@ public class ConfigTest {
 
         FileUtils.cleanDirectory(configMgr.configDirectoryFile);
         configMgr.configDirectoryFile.delete();
+    }
+
+    @Test
+    public void testJacksonHandlesOldVersions() throws IOException {
+        var str =
+                "{\"baseName\":\"aaaaaa\",\"uniqueName\":\"aaaaaa\",\"nickname\":\"aaaaaa\",\"FOV\":70.0,\"path\":\"dev/vid\",\"cameraType\":\"UsbCamera\",\"currentPipelineIndex\":0,\"camPitch\":{\"radians\":0.0},\"calibrations\":[], \"cameraLEDs\":[]}";
+        var writer = new FileWriter("test.json");
+        writer.write(str);
+        writer.flush();
+        writer.close();
+        Assertions.assertDoesNotThrow(
+                () -> JacksonUtils.deserialize(Path.of("test.json"), CameraConfiguration.class));
     }
 }

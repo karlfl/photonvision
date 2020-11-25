@@ -22,8 +22,12 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.text.DateFormat;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.TemporalAccessor;
 import java.util.*;
 import java.util.stream.Collectors;
 import org.photonvision.common.logging.LogGroup;
@@ -40,8 +44,13 @@ public class ConfigManager {
     private static final Logger logger = new Logger(ConfigManager.class, LogGroup.General);
     private static ConfigManager INSTANCE;
 
+    public static final String HW_CFG_FNAME = "hardwareConfig.json";
+    public static final String HW_SET_FNAME = "hardwareSettings.json";
+    public static final String NET_SET_FNAME = "networkSettings.json";
+
     private PhotonConfiguration config;
     private final File hardwareConfigFile;
+    private final File hardwareSettingsFile;
     private final File networkConfigFile;
     private final File camerasFolder;
 
@@ -57,17 +66,17 @@ public class ConfigManager {
     }
 
     public static void saveUploadedSettingsZip(File uploadPath) {
-        logger.info(uploadPath.getAbsolutePath());
         var folderPath = Path.of(System.getProperty("java.io.tmpdir"), "photonvision").toFile();
         folderPath.mkdirs();
         ZipUtil.unpack(uploadPath, folderPath);
         FileUtils.deleteDirectory(getRootFolder());
         try {
             org.apache.commons.io.FileUtils.copyDirectory(folderPath, getRootFolder().toFile());
+            logger.info("Copied settings successfully!");
         } catch (IOException e) {
-            e.printStackTrace();
+            logger.error("Exception copying uploaded settings!", e);
+            return;
         }
-        System.exit(666);
     }
 
     public PhotonConfiguration getConfig() {
@@ -81,17 +90,17 @@ public class ConfigManager {
     ConfigManager(Path configDirectoryFile) {
         this.configDirectoryFile = new File(configDirectoryFile.toUri());
         this.hardwareConfigFile =
-                new File(Path.of(configDirectoryFile.toString(), "hardwareConfig.json").toUri());
+                new File(Path.of(configDirectoryFile.toString(), HW_CFG_FNAME).toUri());
+        this.hardwareSettingsFile =
+                new File(Path.of(configDirectoryFile.toString(), HW_SET_FNAME).toUri());
         this.networkConfigFile =
-                new File(Path.of(configDirectoryFile.toString(), "networkSettings.json").toUri());
+                new File(Path.of(configDirectoryFile.toString(), NET_SET_FNAME).toUri());
         this.camerasFolder = new File(Path.of(configDirectoryFile.toString(), "cameras").toUri());
 
         TimedTaskManager.getInstance().addTask("ConfigManager", this::checkSaveAndWrite, 1000);
-
-        load();
     }
 
-    private void load() {
+    public void load() {
         logger.info("Loading settings...");
         if (!configDirectoryFile.exists()) {
             if (configDirectoryFile.mkdirs()) {
@@ -112,6 +121,7 @@ public class ConfigManager {
         }
 
         HardwareConfig hardwareConfig;
+        HardwareSettings hardwareSettings;
         NetworkConfig networkConfig;
 
         if (hardwareConfigFile.exists()) {
@@ -129,6 +139,23 @@ public class ConfigManager {
         } else {
             logger.info("Hardware config does not exist! Loading defaults");
             hardwareConfig = new HardwareConfig();
+        }
+
+        if (hardwareSettingsFile.exists()) {
+            try {
+                hardwareSettings =
+                        JacksonUtils.deserialize(hardwareSettingsFile.toPath(), HardwareSettings.class);
+                if (hardwareSettings == null) {
+                    logger.error("Could not deserialize hardware settings! Loading defaults");
+                    hardwareSettings = new HardwareSettings();
+                }
+            } catch (IOException e) {
+                logger.error("Could not deserialize hardware settings! Loading defaults");
+                hardwareSettings = new HardwareSettings();
+            }
+        } else {
+            logger.info("Hardware settings does not exist! Loading defaults");
+            hardwareSettings = new HardwareSettings();
         }
 
         if (networkConfigFile.exists()) {
@@ -157,25 +184,25 @@ public class ConfigManager {
 
         HashMap<String, CameraConfiguration> cameraConfigurations = loadCameraConfigs();
 
-        this.config = new PhotonConfiguration(hardwareConfig, networkConfig, cameraConfigurations);
+        this.config =
+                new PhotonConfiguration(
+                        hardwareConfig, hardwareSettings, networkConfig, cameraConfigurations);
     }
 
     public void saveToDisk() {
-        logger.info("Saving settings...");
+        // Delete old configs
+        FileUtils.deleteDirectory(camerasFolder.toPath());
 
-        try {
-            JacksonUtils.serialize(hardwareConfigFile.toPath(), config.getHardwareConfig());
-        } catch (IOException e) {
-            logger.error("Could not save hardware config!", e);
-        }
         try {
             JacksonUtils.serialize(networkConfigFile.toPath(), config.getNetworkConfig());
         } catch (IOException e) {
             logger.error("Could not save network config!", e);
         }
-
-        // Delete old configs
-        FileUtils.deleteDirectory(camerasFolder.toPath());
+        try {
+            JacksonUtils.serialize(hardwareSettingsFile.toPath(), config.getHardwareSettings());
+        } catch (IOException e) {
+            logger.error("Could not save hardware config!", e);
+        }
 
         // save all of our cameras
         var cameraConfigMap = config.getCameraConfigurations();
@@ -216,6 +243,7 @@ public class ConfigManager {
                 }
             }
         }
+        logger.info("Settings saved!");
     }
 
     private HashMap<String, CameraConfiguration> loadCameraConfigs() {
@@ -304,12 +332,8 @@ public class ConfigManager {
         return loadedConfigurations;
     }
 
-    public void addCameraConfigurations(HashMap<VisionSource, List<CVPipelineSettings>> sources) {
-        List<CameraConfiguration> list =
-                sources.keySet().stream()
-                        .map(it -> it.getSettables().getConfiguration())
-                        .collect(Collectors.toList());
-        getConfig().addCameraConfigs(list);
+    public void addCameraConfigurations(HashMap<VisionSource, CameraConfiguration> sources) {
+        getConfig().addCameraConfigs(sources.values());
         requestSave();
     }
 
@@ -333,17 +357,67 @@ public class ConfigManager {
         requestSave();
     }
 
+    public Path getLogsDir() {
+        return Path.of(configDirectoryFile.toString(), "logs");
+    }
+
+    public static final String LOG_PREFIX = "photonvision-";
+    public static final String LOG_EXT = ".log";
+    public static final String LOG_DATE_TIME_FORMAT = "yyyy-M-d_hh-mm-ss";
+
+    public String taToLogFname(TemporalAccessor date) {
+        var dateString = DateTimeFormatter.ofPattern(LOG_DATE_TIME_FORMAT).format(date);
+        return LOG_PREFIX + dateString + LOG_EXT;
+    }
+
+    public Date logFnameToDate(String fname) throws ParseException {
+        // Strip away known unneded portions of the log file name
+        fname = fname.replace(LOG_PREFIX, "").replace(LOG_EXT, "");
+        DateFormat format = new SimpleDateFormat(LOG_DATE_TIME_FORMAT);
+        return format.parse(fname);
+    }
+
     public Path getLogPath() {
-        var dateString = DateTimeFormatter.ofPattern("yyyy-M-d_hh-mm-ss").format(LocalDateTime.now());
-        var logFile =
-                Path.of(configDirectoryFile.toString(), "logs", "photonvision-" + dateString + ".log")
-                        .toFile();
+        var logFile = Path.of(this.getLogsDir().toString(), taToLogFname(LocalDateTime.now())).toFile();
         if (!logFile.getParentFile().exists()) logFile.getParentFile().mkdirs();
         return logFile.toPath();
     }
 
+    public Path getImageSavePath() {
+        var imgFilePath = Path.of(configDirectoryFile.toString(), "imgSaves").toFile();
+        if (!imgFilePath.exists()) imgFilePath.mkdirs();
+        return imgFilePath.toPath();
+    }
+
+    public Path getHardwareConfigFile() {
+        return this.hardwareConfigFile.toPath();
+    }
+
+    public Path getHardwareSettingsFile() {
+        return this.hardwareSettingsFile.toPath();
+    }
+
+    public Path getNetworkConfigFile() {
+        return this.networkConfigFile.toPath();
+    }
+
+    public void saveUploadedHardwareConfig(Path uploadPath) {
+        FileUtils.deleteFile(this.getHardwareConfigFile());
+        FileUtils.copyFile(uploadPath, this.getHardwareConfigFile());
+    }
+
+    public void saveUploadedHardwareSettings(Path uploadPath) {
+        FileUtils.deleteFile(this.getHardwareSettingsFile());
+        FileUtils.copyFile(uploadPath, this.getHardwareSettingsFile());
+    }
+
+    public void saveUploadedNetworkConfig(Path uploadPath) {
+        FileUtils.deleteFile(this.getNetworkConfigFile());
+        FileUtils.copyFile(uploadPath, this.getNetworkConfigFile());
+    }
+
     public void requestSave() {
-        logger.debug("Requesting save...");
+        logger.trace("Requesting save...");
         saveRequestTimestamp = System.currentTimeMillis();
     }
 

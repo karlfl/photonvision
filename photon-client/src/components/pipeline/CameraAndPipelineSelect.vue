@@ -34,7 +34,7 @@
           :hover="true"
           text="edit"
           tooltip="Edit camera name"
-          @click="toCameraNameChange"
+          @click="changeCameraName"
         />
         <div v-else>
           <CVicon
@@ -76,6 +76,7 @@
         lg="2"
       >
         <v-menu
+          v-if="!$store.getters.isDriverMode"
           offset-y
           auto
         >
@@ -291,13 +292,23 @@
             }
         },
         methods: {
-            toCameraNameChange() {
+            changeCameraName() {
                 this.newCameraName = this.$store.getters.cameraList[this.currentCameraIndex];
                 this.isCameraNameEdit = true;
             },
             saveCameraNameChange() {
                 if (this.checkCameraName === "") {
-                    this.handleInputWithIndex("changeCameraName", this.newCameraName);
+                    // this.handleInputWithIndex("changeCameraName", this.newCameraName);
+                    this.axios.post('http://' + this.$address + '/api/setCameraNickname',
+                        {name: this.newCameraName, cameraIndex: this.$store.getters.currentCameraIndex})
+                        // eslint-disable-next-line
+                        .then(r => {
+                            this.$emit('camera-name-changed')
+                        })
+                        .catch(e => {
+                            console.log("HTTP error while changing camera name " + e);
+                            this.$emit('camera-name-changed')
+                        })
                     this.discardCameraNameChange();
                 }
             },
@@ -321,7 +332,7 @@
             },
             deleteCurrentPipeline() {
                 if (this.$store.getters.pipelineList.length > 1) {
-                    this.handleInputWithIndex('command', 'deleteCurrentPipeline');
+                    this.handleInputWithIndex('deleteCurrentPipeline', {});
                 } else {
                     this.snackbar = true;
                 }

@@ -64,6 +64,11 @@ public class FileVisionSource implements VisionSource {
         return settables;
     }
 
+    @Override
+    public boolean isVendorCamera() {
+        return false;
+    }
+
     private static class FileSourceSettables extends VisionSourceSettables {
 
         private final VideoMode videoMode;
@@ -84,7 +89,7 @@ public class FileVisionSource implements VisionSource {
         }
 
         @Override
-        public void setExposure(int exposure) {}
+        public void setExposure(double exposure) {}
 
         @Override
         public void setBrightness(int brightness) {}

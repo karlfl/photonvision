@@ -21,13 +21,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import edu.wpi.first.wpilibj.geometry.Rotation2d;
 import org.apache.commons.math3.util.FastMath;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.opencv.core.*;
+import org.opencv.core.Point;
 import org.opencv.imgproc.Imgproc;
 import org.photonvision.common.util.TestUtils;
 import org.photonvision.common.util.numbers.DoubleCouple;
 import org.photonvision.vision.frame.FrameStaticProperties;
+import org.photonvision.vision.opencv.DualOffsetValues;
 
 public class TargetCalculationsTest {
 
@@ -42,10 +45,10 @@ public class TargetCalculationsTest {
             new TrackedTarget.TargetCalculationParameters(
                     true,
                     TargetOffsetPointEdge.Center,
-                    new Point(),
-                    imageCenterPoint,
-                    new DoubleCouple(1.0, 0.0),
                     RobotOffsetPointMode.None,
+                    new Point(),
+                    new DualOffsetValues(),
+                    imageCenterPoint,
                     props.horizontalFocalLength,
                     props.verticalFocalLength,
                     imageSize.width * imageSize.height);
@@ -172,5 +175,36 @@ public class TargetCalculationsTest {
         // Assert result
         result = TargetCalculations.calculateSkew(isLandscape, minAreaRect);
         assertEquals(-70, result, 0.01);
+    }
+
+    @Test
+    public void testCameraFOVCalculation() {
+        final DoubleCouple glowormHorizVert =
+                FrameStaticProperties.calculateHorizontalVerticalFoV(74.8, 640, 480);
+        var gwHorizDeg = FastMath.toDegrees(glowormHorizVert.getFirst());
+        var gwVertDeg = FastMath.toDegrees(glowormHorizVert.getSecond());
+        assertEquals(62.7, gwHorizDeg, .3);
+        assertEquals(49, gwVertDeg, .3);
+    }
+
+    @Test
+    public void robotOffsetDualTest() {
+        final DualOffsetValues dualOffsetValues =
+                new DualOffsetValues(
+                        new Point(400, 150), 10,
+                        new Point(390, 260), 2);
+
+        final Point expectedHalfway = new Point(393.75, 218.75);
+        final Point expectedOutside = new Point(388.75, 273.75);
+
+        Point crosshairPointHalfway =
+                TargetCalculations.calculateDualOffsetCrosshair(dualOffsetValues, 5);
+        Point crosshairPointOutside =
+                TargetCalculations.calculateDualOffsetCrosshair(dualOffsetValues, 1);
+
+        Assertions.assertEquals(expectedHalfway.x, crosshairPointHalfway.x);
+        Assertions.assertEquals(expectedHalfway.y, crosshairPointHalfway.y);
+        Assertions.assertEquals(expectedOutside.x, crosshairPointOutside.x);
+        Assertions.assertEquals(expectedOutside.y, crosshairPointOutside.y);
     }
 }

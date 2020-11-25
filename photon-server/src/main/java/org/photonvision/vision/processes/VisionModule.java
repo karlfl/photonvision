@@ -37,9 +37,13 @@ import org.photonvision.vision.calibration.CameraCalibrationCoefficients;
 import org.photonvision.vision.camera.CameraQuirk;
 import org.photonvision.vision.camera.QuirkyCamera;
 import org.photonvision.vision.camera.USBCameraSource;
+import org.photonvision.vision.frame.consumer.FileSaveFrameConsumer;
 import org.photonvision.vision.frame.consumer.MJPGFrameConsumer;
+import org.photonvision.vision.pipeline.ReflectivePipelineSettings;
 import org.photonvision.vision.pipeline.UICalibrationData;
 import org.photonvision.vision.pipeline.result.CVPipelineResult;
+import org.photonvision.vision.target.TargetModel;
+import org.photonvision.vision.target.TrackedTarget;
 
 /**
 * This is the God Class
@@ -63,9 +67,13 @@ public class VisionModule {
     protected final QuirkyCamera cameraQuirks;
 
     private long lastFrameConsumeMillis;
+    protected TrackedTarget lastPipelineResultBestTarget;
 
     MJPGFrameConsumer dashboardInputStreamer;
     MJPGFrameConsumer dashboardOutputStreamer;
+
+    FileSaveFrameConsumer inputFrameSaver;
+    FileSaveFrameConsumer outputFrameSaver;
 
     public VisionModule(PipelineManager pipelineManager, VisionSource visionSource, int index) {
         logger =
@@ -91,14 +99,11 @@ public class VisionModule {
 
         DataChangeService.getInstance().addSubscriber(new VisionModuleChangeSubscriber(this));
 
-        dashboardOutputStreamer =
-                new MJPGFrameConsumer(
-                        visionSource.getSettables().getConfiguration().uniqueName + "-output");
-        dashboardInputStreamer =
-                new MJPGFrameConsumer(visionSource.getSettables().getConfiguration().uniqueName + "-input");
-
+        createStreams();
         fpsLimitedResultConsumers.add(result -> dashboardInputStreamer.accept(result.inputFrame));
         fpsLimitedResultConsumers.add(result -> dashboardOutputStreamer.accept(result.outputFrame));
+        fpsLimitedResultConsumers.add(result -> inputFrameSaver.accept(result.inputFrame));
+        fpsLimitedResultConsumers.add(result -> outputFrameSaver.accept(result.outputFrame));
 
         ntConsumer =
                 new NTDataPublisher(
@@ -110,6 +115,9 @@ public class VisionModule {
         uiDataConsumer = new UIDataPublisher(index);
         addResultConsumer(ntConsumer);
         addResultConsumer(uiDataConsumer);
+        addResultConsumer(
+                (result) ->
+                        lastPipelineResultBestTarget = result.hasTargets() ? result.targets.get(0) : null);
 
         setPipeline(visionSource.getSettables().getConfiguration().currentPipelineIndex);
 
@@ -124,10 +132,46 @@ public class VisionModule {
             logger.info("Setting FOV of vendor camera to " + fov);
             visionSource.getSettables().setFOV(fov);
         }
+
+        // Configure LED's if supported by the underlying hardware
+        if (HardwareManager.getInstance().visionLED != null) {
+            HardwareManager.getInstance()
+                    .visionLED
+                    .setPipelineModeSupplier(() -> pipelineManager.getCurrentPipelineSettings().ledMode);
+            setVisionLEDs(pipelineManager.getCurrentPipelineSettings().ledMode);
+        }
+
+        saveAndBroadcastAll();
+    }
+
+    private void destroyStreams() {
+        dashboardInputStreamer.close();
+        dashboardOutputStreamer.close();
+    }
+
+    private void createStreams() {
+        var camStreamIdx = visionSource.getSettables().getConfiguration().streamIndex;
+        // If idx = 0, we want (1181, 1182)
+        var inputStreamPort = 1181 + (camStreamIdx * 2);
+        var outputStreamPort = 1181 + (camStreamIdx * 2) + 1;
+
+        dashboardOutputStreamer =
+                new MJPGFrameConsumer(
+                        visionSource.getSettables().getConfiguration().nickname + "-output", outputStreamPort);
+        dashboardInputStreamer =
+                new MJPGFrameConsumer(
+                        visionSource.getSettables().getConfiguration().uniqueName + "-input", inputStreamPort);
+
+        inputFrameSaver =
+                new FileSaveFrameConsumer(visionSource.getSettables().getConfiguration().nickname, "input");
+        outputFrameSaver =
+                new FileSaveFrameConsumer(
+                        visionSource.getSettables().getConfiguration().nickname, "output");
     }
 
     void setDriverMode(boolean isDriverMode) {
         pipelineManager.setDriverMode(isDriverMode);
+        setVisionLEDs(!isDriverMode);
         saveAndBroadcastAll();
     }
 
@@ -156,10 +200,8 @@ public class VisionModule {
         }
     }
 
-    // TODO improve robustness of this detection
     private boolean isVendorCamera() {
-        return ConfigManager.getInstance().getConfig().getHardwareConfig().hasPresetFOV()
-                && cameraQuirks.hasQuirk(CameraQuirk.PiCam);
+        return visionSource.isVendorCamera();
     }
 
     public void startCalibration(UICalibrationData data) {
@@ -175,6 +217,12 @@ public class VisionModule {
         settings.boardHeight = data.patternHeight;
         settings.boardWidth = data.patternWidth;
         settings.boardType = data.boardType;
+
+        // Disable gain if not applicable
+        if (!cameraQuirks.hasQuirk(CameraQuirk.Gain)) {
+            settings.cameraGain = -1;
+        }
+
         pipelineManager.setCalibrationMode(true);
     }
 
@@ -185,6 +233,8 @@ public class VisionModule {
     public CameraCalibrationCoefficients endCalibration() {
         var ret = pipelineManager.calibration3dPipeline.tryCalibration();
         pipelineManager.setCalibrationMode(false);
+
+        setPipeline(pipelineManager.getCurrentPipelineIndex());
 
         if (ret != null) {
             logger.debug("Saving calibration...");
@@ -217,8 +267,15 @@ public class VisionModule {
             visionSource.getSettables().setGain(config.cameraGain);
         }
 
+        setVisionLEDs(config.ledMode);
+
         visionSource.getSettables().getConfiguration().currentPipelineIndex =
                 pipelineManager.getCurrentPipelineIndex();
+    }
+
+    private void setVisionLEDs(boolean on) {
+        if (HardwareManager.getInstance().visionLED != null)
+            HardwareManager.getInstance().visionLED.setState(on);
     }
 
     public void saveModule() {
@@ -243,21 +300,26 @@ public class VisionModule {
                         OutgoingUIEvent.wrappedOf("mutatePipeline", propertyName, value, originContext));
     }
 
-    void setCameraNickname(String newName) {
+    public void setCameraNickname(String newName) {
         visionSource.getSettables().getConfiguration().nickname = newName;
         ntConsumer.updateCameraNickname(newName);
+        inputFrameSaver.updateCameraNickname(newName);
+        outputFrameSaver.updateCameraNickname(newName);
 
         // rename streams
         fpsLimitedResultConsumers.clear();
 
-        dashboardOutputStreamer =
-                new MJPGFrameConsumer(
-                        visionSource.getSettables().getConfiguration().uniqueName + "-output");
-        dashboardInputStreamer =
-                new MJPGFrameConsumer(visionSource.getSettables().getConfiguration().uniqueName + "-input");
+        // Teardown and recreate streams
+        destroyStreams();
+        createStreams();
 
         fpsLimitedResultConsumers.add(result -> dashboardInputStreamer.accept(result.inputFrame));
         fpsLimitedResultConsumers.add(result -> dashboardOutputStreamer.accept(result.outputFrame));
+        fpsLimitedResultConsumers.add(result -> inputFrameSaver.accept(result.inputFrame));
+        fpsLimitedResultConsumers.add(result -> outputFrameSaver.accept(result.outputFrame));
+
+        // Push new data to the UI
+        saveAndBroadcastAll();
     }
 
     public PhotonConfiguration.UICameraConfiguration toUICameraConfig() {
@@ -305,7 +367,7 @@ public class VisionModule {
         ret.calibrations = calList;
 
         ret.isFovConfigurable =
-                !(HardwareManager.getInstance().getConfig().hasPresetFOV()
+                !(ConfigManager.getInstance().getConfig().getHardwareConfig().hasPresetFOV()
                         && cameraQuirks.hasQuirk(CameraQuirk.PiCam));
 
         return ret;
@@ -343,6 +405,16 @@ public class VisionModule {
                 c.accept(result);
             }
             lastFrameConsumeMillis = System.currentTimeMillis();
+        }
+    }
+
+    public void setTargetModel(TargetModel targetModel) {
+        var settings = pipelineManager.getCurrentUserPipeline().getSettings();
+        if (settings instanceof ReflectivePipelineSettings) {
+            ((ReflectivePipelineSettings) settings).targetModel = targetModel;
+            saveAndBroadcastAll();
+        } else {
+            logger.error("Cannot set target model of non-reflective pipe! Ignoring...");
         }
     }
 }

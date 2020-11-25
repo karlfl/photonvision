@@ -35,6 +35,7 @@ import org.msgpack.jackson.dataformat.MessagePackFactory;
 import org.photonvision.common.dataflow.DataChangeDestination;
 import org.photonvision.common.dataflow.DataChangeService;
 import org.photonvision.common.dataflow.events.IncomingWebSocketEvent;
+import org.photonvision.common.hardware.HardwareManager;
 import org.photonvision.common.logging.LogGroup;
 import org.photonvision.common.logging.Logger;
 import org.photonvision.vision.pipeline.PipelineType;
@@ -51,8 +52,6 @@ public class SocketHandler {
     private final UIOutboundSubscriber uiOutboundSubscriber = new UIOutboundSubscriber(this);
 
     public static class UIMap extends HashMap<String, Object> {}
-
-    abstract static class SelectiveBroadcastPair extends Pair<UIMap, WsContext> {}
 
     private static class ThreadSafeSingleton {
         private static final SocketHandler INSTANCE = new SocketHandler();
@@ -107,14 +106,15 @@ public class SocketHandler {
                     var entryValue = entry.getValue();
                     var socketMessageType = SocketMessageType.fromEntryKey(entryKey);
 
-                    logger.debug(
-                            "Got WS message: ["
-                                    + socketMessageType
-                                    + "] ==> ["
-                                    + entryKey
-                                    + "], ["
-                                    + entryValue
-                                    + "]");
+                    logger.trace(
+                            () ->
+                                    "Got WS message: ["
+                                            + socketMessageType
+                                            + "] ==> ["
+                                            + entryKey
+                                            + "], ["
+                                            + entryValue
+                                            + "]");
 
                     if (socketMessageType == null) {
                         logger.warn("Got unknown socket message type: " + entryKey);
@@ -183,6 +183,12 @@ public class SocketHandler {
                                 dcService.publishEvent(newPipelineEvent);
                                 break;
                             }
+                        case SMT_CHANGEBRIGHTNESS:
+                            {
+                                HardwareManager.getInstance()
+                                        .setBrightnessPercent(Integer.parseInt(entryValue.toString()));
+                                break;
+                            }
                         case SMT_DUPLICATEPIPELINE:
                             {
                                 var pipeIndex = (Integer) entryValue;
@@ -199,30 +205,28 @@ public class SocketHandler {
                                 dcService.publishEvent(newPipelineEvent);
                                 break;
                             }
-                        case SMT_COMMAND:
+                        case SMT_DELETECURRENTPIPELINE:
                             {
-                                var cmd = SocketMessageCommandType.fromEntryKey((String) entryValue);
-                                switch (cmd) {
-                                    case SMCT_DELETECURRENTPIPELINE:
-                                        {
-                                            var deleteCurrentPipelineEvent =
-                                                    new IncomingWebSocketEvent<>(
-                                                            DataChangeDestination.DCD_ACTIVEMODULE,
-                                                            "deleteCurrPipeline",
-                                                            0,
-                                                            cameraIndex,
-                                                            context);
-                                            dcService.publishEvent(deleteCurrentPipelineEvent);
-                                            break;
-                                        }
-                                    case SMCT_SAVE:
-                                        {
-                                            var saveEvent =
-                                                    new IncomingWebSocketEvent<>(DataChangeDestination.DCD_OTHER, "save", 0);
-                                            dcService.publishEvent(saveEvent);
-                                            break;
-                                        }
-                                }
+                                var deleteCurrentPipelineEvent =
+                                        new IncomingWebSocketEvent<>(
+                                                DataChangeDestination.DCD_ACTIVEMODULE,
+                                                "deleteCurrPipeline",
+                                                0,
+                                                cameraIndex,
+                                                context);
+                                dcService.publishEvent(deleteCurrentPipelineEvent);
+                                break;
+                            }
+                        case SMT_ROBOTOFFSETPOINT:
+                            {
+                                var robotOffsetPointEvent =
+                                        new IncomingWebSocketEvent<>(
+                                                DataChangeDestination.DCD_ACTIVEMODULE,
+                                                "robotOffsetPoint",
+                                                (Integer) entryValue,
+                                                cameraIndex,
+                                                null);
+                                dcService.publishEvent(robotOffsetPointEvent);
                                 break;
                             }
                         case SMT_CURRENTCAMERA:
@@ -250,7 +254,7 @@ public class SocketHandler {
                                 var changePipelineEvent =
                                         new IncomingWebSocketEvent<>(
                                                 DataChangeDestination.DCD_ACTIVEMODULE,
-                                                "startcalibration",
+                                                "startCalibration",
                                                 (Map) entryValue,
                                                 cameraIndex,
                                                 context);

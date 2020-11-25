@@ -20,7 +20,6 @@ package org.photonvision;
 import edu.wpi.cscore.CameraServerCvJNI;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import org.apache.commons.cli.*;
 import org.photonvision.common.configuration.CameraConfiguration;
 import org.photonvision.common.configuration.ConfigManager;
@@ -34,9 +33,10 @@ import org.photonvision.common.networking.NetworkManager;
 import org.photonvision.common.util.TestUtils;
 import org.photonvision.server.Server;
 import org.photonvision.vision.camera.FileVisionSource;
-import org.photonvision.vision.camera.USBCameraSource;
+import org.photonvision.vision.opencv.ContourGroupingMode;
 import org.photonvision.vision.pipeline.CVPipelineSettings;
 import org.photonvision.vision.pipeline.ReflectivePipelineSettings;
+import org.photonvision.vision.processes.VisionModule;
 import org.photonvision.vision.processes.VisionModuleManager;
 import org.photonvision.vision.processes.VisionSource;
 import org.photonvision.vision.processes.VisionSourceManager;
@@ -84,58 +84,50 @@ public class Main {
         return true;
     }
 
-    private static HashMap<VisionSource, List<CVPipelineSettings>> gatherSources() {
-        var collectedSources = new HashMap<VisionSource, List<CVPipelineSettings>>();
-        if (!isTestMode) {
-            var camConfigs = ConfigManager.getInstance().getConfig().getCameraConfigurations();
-            logger.info("Loaded " + camConfigs.size() + " configs from disk.");
-            var sources = VisionSourceManager.loadAllSources(camConfigs.values());
+    private static void addTestModeSources() {
+        var collectedSources = new HashMap<VisionSource, CameraConfiguration>();
 
-            for (var src : sources) {
-                var usbSrc = (USBCameraSource) src;
-                collectedSources.put(usbSrc, usbSrc.configuration.pipelineSettings);
-                logger.debug(
-                        () ->
-                                "Matched config for camera \""
-                                        + src.getFrameProvider().getName()
-                                        + "\" and loaded "
-                                        + usbSrc.configuration.pipelineSettings.size()
-                                        + " pipelines");
-            }
-        } else {
-            var camConf2019 =
-                    new CameraConfiguration("WPI2019", TestUtils.getTestMode2019ImagePath().toString());
-            camConf2019.FOV = TestUtils.WPI2019Image.FOV;
-            camConf2019.calibrations.add(TestUtils.get2019LifeCamCoeffs(true));
+        var camConf2019 =
+                new CameraConfiguration("WPI2019", TestUtils.getTestMode2019ImagePath().toString());
+        camConf2019.FOV = TestUtils.WPI2019Image.FOV;
+        camConf2019.calibrations.add(TestUtils.get2019LifeCamCoeffs(true));
 
-            var pipeline2019 = new ReflectivePipelineSettings();
-            pipeline2019.pipelineNickname = "CargoShip";
-            pipeline2019.targetModel = TargetModel.get2019Target();
+        var pipeline2019 = new ReflectivePipelineSettings();
+        pipeline2019.pipelineNickname = "CargoShip";
+        pipeline2019.targetModel = TargetModel.k2019DualTarget;
+        pipeline2019.outputShowMultipleTargets = true;
+        pipeline2019.contourGroupingMode = ContourGroupingMode.Dual;
 
-            var psList2019 = new ArrayList<CVPipelineSettings>();
-            psList2019.add(pipeline2019);
+        var psList2019 = new ArrayList<CVPipelineSettings>();
+        psList2019.add(pipeline2019);
 
-            var fvs2019 = new FileVisionSource(camConf2019);
+        var fvs2019 = new FileVisionSource(camConf2019);
 
-            var camConf2020 =
-                    new CameraConfiguration("WPI2020", TestUtils.getTestMode2020ImagePath().toString());
-            camConf2020.FOV = TestUtils.WPI2020Image.FOV;
-            camConf2019.calibrations.add(TestUtils.get2019LifeCamCoeffs(true));
+        var camConf2020 =
+                new CameraConfiguration("WPI2020", TestUtils.getTestMode2020ImagePath().toString());
+        camConf2020.FOV = TestUtils.WPI2020Image.FOV;
+        camConf2019.calibrations.add(TestUtils.get2019LifeCamCoeffs(true));
 
-            var pipeline2020 = new ReflectivePipelineSettings();
-            pipeline2020.pipelineNickname = "OuterPort";
-            pipeline2020.targetModel = TargetModel.get2020Target();
-            camConf2019.calibrations.add(TestUtils.get2019LifeCamCoeffs(true));
+        var pipeline2020 = new ReflectivePipelineSettings();
+        pipeline2020.pipelineNickname = "OuterPort";
+        pipeline2020.targetModel = TargetModel.k2020HighGoalOuter;
+        camConf2020.calibrations.add(TestUtils.get2020LifeCamCoeffs(true));
 
-            var psList2020 = new ArrayList<CVPipelineSettings>();
-            psList2020.add(pipeline2020);
+        var psList2020 = new ArrayList<CVPipelineSettings>();
+        psList2020.add(pipeline2020);
 
-            var fvs2020 = new FileVisionSource(camConf2020);
+        var fvs2020 = new FileVisionSource(camConf2020);
 
-            collectedSources.put(fvs2019, psList2019);
-            collectedSources.put(fvs2020, psList2020);
-        }
-        return collectedSources;
+        var cfg2019 = new CameraConfiguration("2019", "2019");
+        cfg2019.pipelineSettings = psList2019;
+        var cfg2020 = new CameraConfiguration("2019", "2019");
+        cfg2020.pipelineSettings = psList2020;
+        collectedSources.put(fvs2019, cfg2019);
+        collectedSources.put(fvs2020, cfg2020);
+
+        //                logger.info("Adding " + allSources.size() + " configs to VMM.");
+        VisionModuleManager.getInstance().addSources(collectedSources).forEach(VisionModule::start);
+        ConfigManager.getInstance().addCameraConfigurations(collectedSources);
     }
 
     public static void main(String[] args) {
@@ -145,14 +137,13 @@ public class Main {
             logger.error("Failed to parse command-line options!", e);
         }
 
-        System.out.println("Running in " + (isRelease ? "release" : "development") + " mode!");
-        var logLevel = (isRelease || printDebugLogs) ? LogLevel.INFO : LogLevel.DEBUG;
+        var logLevel = LogLevel.DEBUG;
         Logger.setLevel(LogGroup.Camera, logLevel);
         Logger.setLevel(LogGroup.WebServer, logLevel);
         Logger.setLevel(LogGroup.VisionModule, logLevel);
         Logger.setLevel(LogGroup.Data, logLevel);
         Logger.setLevel(LogGroup.General, logLevel);
-        logger.info("Logging initialized in " + (isRelease ? "Release" : "Debug") + " mode.");
+        logger.info("Logging initialized in debug mode.");
 
         logger.info(
                 "Starting PhotonVision version "
@@ -162,28 +153,32 @@ public class Main {
 
         try {
             CameraServerCvJNI.forceLoad();
+            TestUtils.loadLibraries();
             logger.info("Native libraries loaded.");
         } catch (Exception e) {
             logger.error("Failed to load native libraries!", e);
         }
 
-        ConfigManager.getInstance(); // init config manager
-        NetworkManager.getInstance().initialize(false);
+        ConfigManager.getInstance().load(); // init config manager
+        ConfigManager.getInstance().requestSave();
+
+        // Force load the hardware manager
+        HardwareManager.getInstance();
+
+        NetworkManager.getInstance().reinitialize();
 
         NetworkTablesManager.getInstance()
                 .setConfig(ConfigManager.getInstance().getConfig().getNetworkConfig());
 
-        HashMap<VisionSource, List<CVPipelineSettings>> allSources = gatherSources();
+        if (!isTestMode) {
+            VisionSourceManager.getInstance()
+                    .registerLoadedConfigs(
+                            ConfigManager.getInstance().getConfig().getCameraConfigurations().values());
+            VisionSourceManager.getInstance().registerTimedTask();
+        } else {
+            addTestModeSources();
+        }
 
-        logger.info("Adding " + allSources.size() + " configs to VMM.");
-        VisionModuleManager.getInstance().addSources(allSources);
-        ConfigManager.getInstance().addCameraConfigurations(allSources);
-
-        // Add hardware config to hardware manager
-        HardwareManager.getInstance()
-                .setConfig(ConfigManager.getInstance().getConfig().getHardwareConfig());
-
-        VisionModuleManager.getInstance().startModules();
         Server.main(DEFAULT_WEBPORT);
     }
 }

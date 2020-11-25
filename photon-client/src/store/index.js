@@ -11,18 +11,15 @@ const set = key => (state, val) => {
 
 export default new Vuex.Store({
     modules: {
-        reflectivePipelineSettings: {
-            state: {
-                currentResolutionIndex: 0,
-            },
-        },
         undoRedo: undoRedo
     },
     state: {
         backendConnected: false,
+        connectedCallbacks: [],
         colorPicking: false,
-        saveBar: false,
+        logsOverlay: false,
         compactMode: localStorage.getItem("compactMode") === undefined ? undefined : localStorage.getItem("compactMode") === "true", // Compact mode is initially unset on purpose
+        logMessages: [],
         currentCameraIndex: 0,
         selectedOutputs: [0, 1], // 0 indicates normal, 1 indicates threshold
         cameraSettings: [ // This is a list of objects representing the settings of all cameras
@@ -61,8 +58,6 @@ export default new Vuex.Store({
                     hsvHue: [0, 15],
                     hsvSaturation: [0, 15],
                     hsvValue: [0, 25],
-                    erode: false,
-                    dilate: false,
                     contourArea: [0, 12],
                     contourRatio: [0, 12],
                     contourFullness: [0, 12],
@@ -93,7 +88,7 @@ export default new Vuex.Store({
                     skew: 0,
                     area: 0,
                     // 3D only
-                    pose: {x: 0, y: 0, rotation: 0},
+                    pose: {x: 0, y: 0, rot: 0},
                 }]
             },
         settings: {
@@ -112,8 +107,8 @@ export default new Vuex.Store({
                 // Below options are only configurable if supported is true
                 connectionType: 0, // 0 = DHCP, 1 = Static
                 staticIp: "",
-                netmask: "",
                 hostname: "photonvision",
+                runNTServer: false,
             },
             lighting: {
                 supported: true,
@@ -126,19 +121,32 @@ export default new Vuex.Store({
             minCount: 25,
             hasEnough: false,
             squareSizeIn: 1.0,
-            patternWidth: 7,
-            patternHeight: 7,
+            patternWidth: 8,
+            patternHeight: 8,
             boardType: 0, // Chessboard, dotboard
         },
+        metrics: {
+            cpuTemp: "N/A",
+            cpuUtil: "N/A",
+            cpuMem: "N/A",
+            gpuMem: "N/A",
+            ramUtil: "N/A",
+            gpuMemUtil: "N/A",
+        }
     },
     mutations: {
-        saveBar: set('saveBar'),
         compactMode: set('compactMode'),
         cameraSettings: set('cameraSettings'),
         currentCameraIndex: set('currentCameraIndex'),
         selectedOutputs: set('selectedOutputs'),
         settings: set('settings'),
         calibrationData: set('calibrationData'),
+        metrics: set('metrics'),
+        logString: (state, newStr) => {
+            const str = state.logMessages;
+            str.push(newStr)
+            Vue.set(state, 'logString', str)
+        },
 
         solvePNPEnabled: (state, val) => {
             state.cameraSettings[state.currentCameraIndex].currentPipelineSettings.solvePNPEnabled = val;
@@ -172,6 +180,17 @@ export default new Vuex.Store({
             }
         },
 
+        mutateNetworkSettings: (state, payload) => {
+            for (let key in payload) {
+                if (!payload.hasOwnProperty(key)) continue;
+                const value = payload[key];
+                const settings = state.settings.networkSettings;
+                if (settings.hasOwnProperty(key)) {
+                    Vue.set(settings, key, value);
+                }
+            }
+        },
+
         mutatePipelineResults(state, payload) {
             // Key: index, value: result
             for (let key in payload) {
@@ -181,8 +200,12 @@ export default new Vuex.Store({
                     Vue.set(state, 'pipelineResults', payload[key])
                 }
             }
+        },
 
-
+        mutateEnabledLEDPercentage(state, payload)  {
+            const settings = state.settings;
+            settings.lighting.brightness = payload;
+            Vue.set(state, "settings", settings);
         },
 
         mutateCalibrationState: (state, payload) => {
@@ -204,6 +227,11 @@ export default new Vuex.Store({
                 "http://" + location.hostname + ":" + state.cameraSettings[state.currentCameraIndex].outputStreamPort + "/stream.mjpg"],
         currentPipelineResults: state => {
             return state.pipelineResults;
+        },
+        isCalibrated: state => {
+            let resolution = state.cameraSettings[state.currentCameraIndex].videoFormatList[state.cameraSettings[state.currentCameraIndex].currentPipelineSettings.cameraVideoModeIndex];
+            return state.cameraSettings[state.currentCameraIndex].calibrations
+                .some(e => e.width === resolution.width && e.height === resolution.height);
         },
         cameraList: state => state.cameraSettings.map(it => it.nickname),
         currentCameraSettings: state => state.cameraSettings[state.currentCameraIndex],

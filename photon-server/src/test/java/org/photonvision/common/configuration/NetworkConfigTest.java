@@ -15,20 +15,20 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package org.photonvision.server;
+package org.photonvision.common.configuration;
 
-public enum SocketMessageCommandType {
-    SMCT_DELETECURRENTPIPELINE("deleteCurrentPipeline"),
-    SMCT_SAVE("save");
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
+import java.nio.file.Path;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
-    public final String entryValue;
-
-    SocketMessageCommandType(String entryValue) {
-        this.entryValue = entryValue;
-    }
-
-    public static SocketMessageCommandType fromEntryKey(String entryValue) {
-        if (entryValue.equalsIgnoreCase(SMCT_SAVE.entryValue)) return SMCT_SAVE;
-        else return SMCT_DELETECURRENTPIPELINE;
+public class NetworkConfigTest {
+    @Test
+    public void testSerialization() throws IOException {
+        var mapper = new ObjectMapper();
+        var path = Path.of("netTest.json");
+        mapper.writeValue(path.toFile(), new NetworkConfig());
+        Assertions.assertDoesNotThrow(() -> mapper.readValue(path.toFile(), NetworkConfig.class));
     }
 }

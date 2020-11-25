@@ -46,8 +46,6 @@ public class NetworkTablesManager {
 
     private static final Logger logger = new Logger(NetworkTablesManager.class, LogGroup.General);
 
-    public boolean isServer = false;
-
     private static class NTLogger implements Consumer<LogMessage> {
 
         private boolean hasReportedConnectionFailure = false;
@@ -69,15 +67,14 @@ public class NetworkTablesManager {
     }
 
     public void setConfig(NetworkConfig config) {
-        if (config.teamNumber > 0) {
-            setClientMode(config.teamNumber);
-        } else {
+        if (config.runNTServer) {
             setServerMode();
+        } else {
+            setClientMode(config.teamNumber);
         }
     }
 
     private void setClientMode(int teamNumber) {
-        isServer = false;
         logger.info("Starting NT Client");
         ntInstance.stopServer();
 
@@ -91,7 +88,6 @@ public class NetworkTablesManager {
     }
 
     private void setServerMode() {
-        isServer = true;
         logger.info("Starting NT Server");
         ntInstance.stopClient();
         ntInstance.startServer();

@@ -22,21 +22,16 @@ import org.apache.commons.math3.util.FastMath;
 public class MathUtils {
     MathUtils() {}
 
-    public static double sigmoid(Number x) {
-        double bias = 0;
-        double a = 5;
-        double b = -0.05;
-        double k = 200;
-
-        if (x.doubleValue() < 50) {
-            bias = -1.338;
-        }
-
-        return ((k / (1 + Math.pow(Math.E, (a + (b * x.doubleValue()))))) + bias);
-    }
-
     public static double toSlope(Number angle) {
         return FastMath.atan(FastMath.toRadians(angle.doubleValue() - 90));
+    }
+
+    public static int safeDivide(int quotient, int divisor) {
+        if (divisor == 0) {
+            return 0;
+        } else {
+            return quotient / divisor;
+        }
     }
 
     public static double roundTo(double value, int to) {
@@ -46,5 +41,14 @@ public class MathUtils {
 
     public static double nanosToMillis(long nanos) {
         return nanos / 1000000.0;
+    }
+
+    public static double map(
+            double value, double in_min, double in_max, double out_min, double out_max) {
+        return (value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+    }
+
+    public static int map(int value, int inMin, int inMax, int outMin, int outMax) {
+        return (int) Math.floor(map((double) value, inMin, inMax, outMin, outMax) + 0.5);
     }
 }

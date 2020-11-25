@@ -53,7 +53,7 @@ public class Server {
                                     ws ->
                                             ws.onBinaryMessage(
                                                     ctx ->
-                                                            logger.debug(
+                                                            logger.trace(
                                                                     () -> {
                                                                         var insa = ctx.session.getRemote().getInetSocketAddress();
                                                                         var host = insa.getAddress().toString() + ":" + insa.getPort();
@@ -79,6 +79,9 @@ public class Server {
         app.post("/api/settings/endCalibration", RequestHandler::onCalibrationEnd);
         app.post("/api/restartDevice", RequestHandler::restartDevice);
         app.post("api/restartProgram", RequestHandler::restartProgram);
+        app.post("api/vision/pnpModel", RequestHandler::uploadPnpModel);
+        app.post("api/sendMetrics", RequestHandler::sendMetrics);
+        app.post("api/setCameraNickname", RequestHandler::setCameraNickname);
 
         app.start(port);
     }

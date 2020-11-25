@@ -3,6 +3,7 @@
   "deviceLogoPath": "photonvision.png",
   "supportURL": "https://support.photonvision.com",
   "ledPins" : [2, 13],
+  "statusRGBPins" : [-1, -1, -1],
   "ledSetCommand" : "",
   "ledsCanDim" : true,
   "ledPWMRange" : [0, 100],
@@ -14,7 +15,6 @@
   "cpuMemoryCommand" : "echo 10",
   "cpuUtilCommand" : "echo 10",
   "gpuMemoryCommand" : "echo 10",
-  "gpuTempCommand" : "echo 10",
   "ramUtilCommand" : "echo 10",
   "restartHardwareCommand" : "echo 10",
   "vendorFOV" : 40.0

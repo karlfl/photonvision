@@ -14,6 +14,11 @@
         name: "CvImage",
         // eslint-disable-next-line vue/require-prop-types
         props: ['address', 'scale', 'maxHeight', 'maxHeightMd', 'maxHeightXl', 'colorPicking', 'id', 'disconnected'],
+        data() {
+            return {
+                seed: 1.0,
+            }
+        },
         computed: {
             styleObject: {
                 get() {
@@ -29,7 +34,6 @@
                       height: `${this.scale}%`,
                       cursor: (this.colorPicking ? `url(${require("../../assets/eyedropper.svg")}),` : "") + "default",
                     };
-                    console.log(ret);
 
                     if (this.$vuetify.breakpoint.xl) {
                       ret["max-height"] = this.maxHeightXl;
@@ -42,9 +46,17 @@
             },
             src: {
               get() {
-                return this.disconnected ? require("../../assets/noStream.jpg") : this.address;
+                return this.disconnected ? require("../../assets/noStream.jpg") : this.address + "?" + this.seed // This prevents caching
               },
             },
+        },
+        mounted() {
+            this.reload(); // Force reload image on creation
+        },
+        methods: {
+            reload() {
+                this.seed = new Date().getTime();
+            }
         },
     }
 </script>

@@ -19,20 +19,26 @@ package org.photonvision.common.hardware.metrics;
 
 public class CPUMetrics extends MetricsBase {
 
-    public CPUMetrics() {}
+    private String cpuMemSplit = null;
 
-    public double getMemory() {
-        if (cpuMemoryCommand.isEmpty()) return 0;
-        return execute(cpuMemoryCommand);
+    public String getMemory() {
+        if (cpuMemoryCommand.isEmpty()) return "";
+        if (cpuMemSplit == null) {
+            cpuMemSplit = execute(cpuMemoryCommand);
+        }
+        return cpuMemSplit;
     }
 
-    // TODO: Command should return in Celsius
-    public double getTemp() {
-        if (cpuTemperatureCommand.isEmpty()) return 0;
-        return execute(cpuTemperatureCommand) / 1000;
+    public String getTemp() {
+        if (cpuTemperatureCommand.isEmpty()) return "";
+        try {
+            return execute(cpuTemperatureCommand);
+        } catch (Exception e) {
+            return "N/A";
+        }
     }
 
-    public double getUtilization() {
+    public String getUtilization() {
         return execute(cpuUtilizationCommand);
     }
 }

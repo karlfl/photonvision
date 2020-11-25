@@ -32,10 +32,14 @@ import org.photonvision.common.configuration.ConfigManager;
 import org.photonvision.common.configuration.NetworkConfig;
 import org.photonvision.common.dataflow.networktables.NetworkTablesManager;
 import org.photonvision.common.hardware.HardwareManager;
+import org.photonvision.common.hardware.Platform;
+import org.photonvision.common.hardware.metrics.MetricsPublisher;
 import org.photonvision.common.logging.LogGroup;
 import org.photonvision.common.logging.Logger;
 import org.photonvision.common.networking.NetworkManager;
+import org.photonvision.common.util.ShellExec;
 import org.photonvision.vision.processes.VisionModuleManager;
+import org.photonvision.vision.target.TargetModel;
 
 public class RequestHandler {
     private static final Logger logger = new Logger(RequestHandler.class, LogGroup.WebServer);
@@ -45,19 +49,59 @@ public class RequestHandler {
     public static void onSettingUpload(Context ctx) {
         var file = ctx.uploadedFile("zipData");
         if (file != null) {
-            var tempZipPath =
+
+            // Copy the file from the client to a temporary location
+            var tempFilePath =
                     new File(Path.of(System.getProperty("java.io.tmpdir"), file.getFilename()).toString());
-            tempZipPath.getParentFile().mkdirs();
+            tempFilePath.getParentFile().mkdirs();
             try {
-                FileUtils.copyInputStreamToFile(file.getContent(), tempZipPath);
+                FileUtils.copyInputStreamToFile(file.getContent(), tempFilePath);
             } catch (IOException e) {
-                logger.error("Exception uploading settings file!");
+                logger.error("Exception while uploading settings file to temp folder!");
                 e.printStackTrace();
+                return;
             }
-            ConfigManager.saveUploadedSettingsZip(tempZipPath);
-            //            restartDevice();
+
+            // Process the file by its extension
+            if (file.getExtension().contains("zip")) {
+                // .zip files are assumed to be full packages of configuration files
+                logger.debug("Processing uploaded settings zip " + file.getFilename());
+                ConfigManager.saveUploadedSettingsZip(tempFilePath);
+
+            } else if (file.getFilename().equals(ConfigManager.HW_CFG_FNAME)) {
+                // Filenames matching the hardware config .json file are assumed to be
+                // hardware config .json's
+                logger.debug("Processing uploaded hardware config " + file.getFilename());
+                ConfigManager.getInstance().saveUploadedHardwareConfig(tempFilePath.toPath());
+
+            } else if (file.getFilename().equals(ConfigManager.HW_SET_FNAME)) {
+                // Filenames matching the hardware settings .json file are assumed to be
+                // hardware settings.json's
+                logger.debug("Processing uploaded hardware settings" + file.getFilename());
+                ConfigManager.getInstance().saveUploadedHardwareSettings(tempFilePath.toPath());
+
+            } else if (file.getFilename().equals(ConfigManager.NET_SET_FNAME)) {
+                // Filenames matching the network config .json file are assumed to be
+                // network config .json's
+                logger.debug("Processing uploaded network config " + file.getFilename());
+                ConfigManager.getInstance().saveUploadedNetworkConfig(tempFilePath.toPath());
+
+            } else {
+                logger.error(
+                        "Couldn't apply provided settings file - did not recognize "
+                                + file.getFilename()
+                                + " as a supported file.");
+                ctx.status(500);
+                return;
+            }
+
+            ctx.status(200);
+            logger.info("Settings uploaded, going down for restart.");
+            restartProgram(ctx);
+
         } else {
-            logger.error("Couldn't read uploaded settings ZIP! Ignoring.");
+            logger.error("Couldn't read uploaded file! Ignoring.");
+            ctx.status(500);
         }
     }
 
@@ -65,21 +109,13 @@ public class RequestHandler {
     public static void onGeneralSettings(Context context) throws JsonProcessingException {
         Map<String, Object> map =
                 (Map<String, Object>) kObjectMapper.readValue(context.body(), Map.class);
-        var networking =
-                (Map<String, Object>)
-                        map.get("networkSettings"); // teamNumber (int), supported (bool), connectionType (int),
-        // staticIp (str), netmask (str), gateway (str), hostname (str)
-        var lighting =
-                (Map<String, Object>) map.get("lighting"); // supported (true/false), brightness (int)
-        // TODO do stuff with lighting
 
-        var networkConfig = NetworkConfig.fromHashMap(networking);
+        var networkConfig = NetworkConfig.fromHashMap(map);
         ConfigManager.getInstance().setNetworkSettings(networkConfig);
         ConfigManager.getInstance().requestSave();
         NetworkManager.getInstance().reinitialize();
         NetworkTablesManager.getInstance().setConfig(networkConfig);
 
-        logger.info("Responding to general settings with http 200");
         context.status(200);
     }
 
@@ -126,6 +162,7 @@ public class RequestHandler {
     }
 
     public static void onCalibrationEnd(Context ctx) {
+        logger.info("Calibrating camera! This will take a long time...");
         var index = Integer.parseInt(ctx.body());
         var calData = VisionModuleManager.getInstance().getModule(index).endCalibration();
         if (calData == null) {
@@ -135,6 +172,7 @@ public class RequestHandler {
 
         ctx.result(String.valueOf(calData.standardDeviation));
         ctx.status(200);
+        logger.info("Camera calibrated!");
     }
 
     public static void restartDevice(Context ctx) {
@@ -147,6 +185,54 @@ public class RequestHandler {
     */
     public static void restartProgram(Context ctx) {
         ctx.status(200);
-        System.exit(0);
+
+        if (Platform.isRaspberryPi()) {
+            try {
+                new ShellExec().executeBashCommand("systemctl restart photonvision");
+            } catch (IOException e) {
+                logger.error("Could not restart device!", e);
+                System.exit(0);
+            }
+        } else {
+            System.exit(0);
+        }
+    }
+
+    public static void setCameraNickname(Context ctx) {
+        try {
+            var data = kObjectMapper.readValue(ctx.body(), HashMap.class);
+            String name = String.valueOf(data.get("name"));
+            int idx = Integer.parseInt(String.valueOf(data.get("cameraIndex")));
+            VisionModuleManager.getInstance().getModule(idx).setCameraNickname(name);
+            ctx.status(200);
+            return;
+        } catch (JsonProcessingException e) {
+            e.printStackTrace();
+        }
+        ctx.status(500);
+    }
+
+    public static void uploadPnpModel(Context ctx) {
+        UITargetData data;
+        try {
+            data = kObjectMapper.readValue(ctx.body(), UITargetData.class);
+        } catch (JsonProcessingException e) {
+            e.printStackTrace();
+            ctx.status(500);
+            return;
+        }
+
+        VisionModuleManager.getInstance().getModule(data.index).setTargetModel(data.targetModel);
+        ctx.status(200);
+    }
+
+    public static void sendMetrics(Context ctx) {
+        MetricsPublisher.getInstance().publish();
+        ctx.status(200);
+    }
+
+    public static class UITargetData {
+        public int index;
+        public TargetModel targetModel;
     }
 }

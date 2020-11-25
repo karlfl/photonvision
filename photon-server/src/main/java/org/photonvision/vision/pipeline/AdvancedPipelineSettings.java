@@ -18,6 +18,7 @@
 package org.photonvision.vision.pipeline;
 
 import java.util.Objects;
+import org.opencv.core.Point;
 import org.photonvision.common.util.numbers.DoubleCouple;
 import org.photonvision.common.util.numbers.IntegerCouple;
 import org.photonvision.vision.opencv.ContourSortMode;
@@ -37,9 +38,6 @@ public class AdvancedPipelineSettings extends CVPipelineSettings {
 
     public boolean outputShouldDraw = true;
     public boolean outputShowMultipleTargets = false;
-
-    public boolean erode = false;
-    public boolean dilate = false;
 
     public DoubleCouple contourArea = new DoubleCouple(0.0, 100.0);
     public DoubleCouple contourRatio = new DoubleCouple(0.0, 20.0);
@@ -62,11 +60,13 @@ public class AdvancedPipelineSettings extends CVPipelineSettings {
     public RobotOffsetPointMode offsetRobotOffsetMode = RobotOffsetPointMode.None;
 
     // the point set by the user in Single Point Offset mode (maybe double too? idr)
-    public DoubleCouple offsetCalibrationPoint = new DoubleCouple();
+    public Point offsetSinglePoint = new Point();
 
     // the two values that define the line of the Dual Point Offset calibration (think y=mx+b)
-    public double offsetDualLineM = 1;
-    public double offsetDualLineB = 0;
+    public Point offsetDualPointA = new Point();
+    public double offsetDualPointAArea = 0;
+    public Point offsetDualPointB = new Point();
+    public double offsetDualPointBArea = 0;
 
     @Override
     public boolean equals(Object o) {
@@ -76,11 +76,13 @@ public class AdvancedPipelineSettings extends CVPipelineSettings {
         AdvancedPipelineSettings that = (AdvancedPipelineSettings) o;
         return outputShouldDraw == that.outputShouldDraw
                 && outputShowMultipleTargets == that.outputShowMultipleTargets
-                && erode == that.erode
-                && dilate == that.dilate
                 && contourSpecklePercentage == that.contourSpecklePercentage
-                && Double.compare(that.offsetDualLineM, offsetDualLineM) == 0
-                && Double.compare(that.offsetDualLineB, offsetDualLineB) == 0
+                && Double.compare(that.offsetDualPointA.x, offsetDualPointA.x) == 0
+                && Double.compare(that.offsetDualPointA.y, offsetDualPointA.y) == 0
+                && Double.compare(that.offsetDualPointAArea, offsetDualPointAArea) == 0
+                && Double.compare(that.offsetDualPointB.x, offsetDualPointB.x) == 0
+                && Double.compare(that.offsetDualPointB.y, offsetDualPointB.y) == 0
+                && Double.compare(that.offsetDualPointBArea, offsetDualPointBArea) == 0
                 && hsvHue.equals(that.hsvHue)
                 && hsvSaturation.equals(that.hsvSaturation)
                 && hsvValue.equals(that.hsvValue)
@@ -91,7 +93,7 @@ public class AdvancedPipelineSettings extends CVPipelineSettings {
                 && contourTargetOffsetPointEdge == that.contourTargetOffsetPointEdge
                 && contourTargetOrientation == that.contourTargetOrientation
                 && offsetRobotOffsetMode == that.offsetRobotOffsetMode
-                && offsetCalibrationPoint.equals(that.offsetCalibrationPoint);
+                && offsetSinglePoint.equals(that.offsetSinglePoint);
     }
 
     @Override
@@ -103,8 +105,6 @@ public class AdvancedPipelineSettings extends CVPipelineSettings {
                 hsvValue,
                 outputShouldDraw,
                 outputShowMultipleTargets,
-                erode,
-                dilate,
                 contourArea,
                 contourRatio,
                 contourFullness,
@@ -113,8 +113,10 @@ public class AdvancedPipelineSettings extends CVPipelineSettings {
                 contourTargetOffsetPointEdge,
                 contourTargetOrientation,
                 offsetRobotOffsetMode,
-                offsetCalibrationPoint,
-                offsetDualLineM,
-                offsetDualLineB);
+                offsetSinglePoint,
+                offsetDualPointA,
+                offsetDualPointAArea,
+                offsetDualPointB,
+                offsetDualPointBArea);
     }
 }
