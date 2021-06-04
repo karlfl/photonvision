@@ -1,0 +1,26 @@
+apply plugin: 'maven-publish'
+
+def artifactGroupId = 'org.photonvision'
+def baseArtifactId = 'PhotonTargeting'
+
+publishing {
+    repositories {
+        maven {
+            url 'https://maven.photonvision.org/repository/internal'
+            credentials {
+                username 'ghactions'
+                password System.getenv("ARTIFACTORY_API_KEY")
+            }
+        }
+    }
+
+    publications {
+        mavenJava(MavenPublication) {
+            groupId = artifactGroupId
+            artifactId = "${baseArtifactId}-java"
+            version = pubVersion
+
+            from components.java
+        }
+    }
+}

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Photon Vision.
+ * Copyright (C) Photon Vision.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,7 +19,6 @@ package org.photonvision;
 
 import edu.wpi.cscore.CameraServerCvJNI;
 import java.util.ArrayList;
-import java.util.HashMap;
 import org.apache.commons.cli.*;
 import org.photonvision.common.configuration.CameraConfiguration;
 import org.photonvision.common.configuration.ConfigManager;
@@ -31,10 +30,13 @@ import org.photonvision.common.logging.LogLevel;
 import org.photonvision.common.logging.Logger;
 import org.photonvision.common.networking.NetworkManager;
 import org.photonvision.common.util.TestUtils;
+import org.photonvision.raspi.PicamJNI;
 import org.photonvision.server.Server;
 import org.photonvision.vision.camera.FileVisionSource;
+import org.photonvision.vision.opencv.CVMat;
 import org.photonvision.vision.opencv.ContourGroupingMode;
 import org.photonvision.vision.pipeline.CVPipelineSettings;
+import org.photonvision.vision.pipeline.PipelineProfiler;
 import org.photonvision.vision.pipeline.ReflectivePipelineSettings;
 import org.photonvision.vision.processes.VisionModule;
 import org.photonvision.vision.processes.VisionModuleManager;
@@ -55,13 +57,11 @@ public class Main {
         final var options = new Options();
         options.addOption("d", "debug", false, "Enable debug logging prints");
         options.addOption("h", "help", false, "Show this help text and exit");
-        if (!isRelease) {
-            options.addOption(
-                    "t",
-                    "test-mode",
-                    false,
-                    "Run in test mode with 2019 and 2020 WPI field images in place of cameras");
-        }
+        options.addOption(
+                "t",
+                "test-mode",
+                false,
+                "Run in test mode with 2019 and 2020 WPI field images in place of cameras");
 
         CommandLineParser parser = new DefaultParser();
         CommandLine cmd = parser.parse(options, args);
@@ -85,7 +85,7 @@ public class Main {
     }
 
     private static void addTestModeSources() {
-        var collectedSources = new HashMap<VisionSource, CameraConfiguration>();
+        var collectedSources = new ArrayList<VisionSource>();
 
         var camConf2019 =
                 new CameraConfiguration("WPI2019", TestUtils.getTestMode2019ImagePath().toString());
@@ -118,12 +118,10 @@ public class Main {
 
         var fvs2020 = new FileVisionSource(camConf2020);
 
-        var cfg2019 = new CameraConfiguration("2019", "2019");
-        cfg2019.pipelineSettings = psList2019;
-        var cfg2020 = new CameraConfiguration("2019", "2019");
-        cfg2020.pipelineSettings = psList2020;
-        collectedSources.put(fvs2019, cfg2019);
-        collectedSources.put(fvs2020, cfg2020);
+        fvs2019.getCameraConfiguration().pipelineSettings = psList2019;
+        fvs2020.getCameraConfiguration().pipelineSettings = psList2020;
+        collectedSources.add(fvs2019);
+        collectedSources.add(fvs2020);
 
         //                logger.info("Adding " + allSources.size() + " configs to VMM.");
         VisionModuleManager.getInstance().addSources(collectedSources).forEach(VisionModule::start);
@@ -137,7 +135,10 @@ public class Main {
             logger.error("Failed to parse command-line options!", e);
         }
 
-        var logLevel = LogLevel.DEBUG;
+        CVMat.enablePrint(false);
+        PipelineProfiler.enablePrint(false);
+
+        var logLevel = printDebugLogs ? LogLevel.TRACE : LogLevel.DEBUG;
         Logger.setLevel(LogGroup.Camera, logLevel);
         Logger.setLevel(LogGroup.WebServer, logLevel);
         Logger.setLevel(LogGroup.VisionModule, logLevel);
@@ -153,6 +154,7 @@ public class Main {
 
         try {
             CameraServerCvJNI.forceLoad();
+            PicamJNI.forceLoad();
             TestUtils.loadLibraries();
             logger.info("Native libraries loaded.");
         } catch (Exception e) {

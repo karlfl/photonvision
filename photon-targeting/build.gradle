@@ -1,0 +1,12 @@
+apply plugin: "java"
+
+dependencies {
+    implementation "edu.wpi.first.wpimath:wpimath-java:$wpilibVersion"
+}
+
+java {
+    withJavadocJar()
+    withSourcesJar()
+}
+
+apply from: "publish.gradle"

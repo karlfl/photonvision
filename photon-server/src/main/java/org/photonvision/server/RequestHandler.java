@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 Photon Vision.
+ * Copyright (C) Photon Vision.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -188,7 +188,7 @@ public class RequestHandler {
 
         if (Platform.isRaspberryPi()) {
             try {
-                new ShellExec().executeBashCommand("systemctl restart photonvision");
+                new ShellExec().executeBashCommand("systemctl restart photonvision.service");
             } catch (IOException e) {
                 logger.error("Could not restart device!", e);
                 System.exit(0);

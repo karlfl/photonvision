@@ -25,8 +25,8 @@
             />
             <CVnumberinput
               v-model="cameraSettings.fov"
-              :tooltip="cameraSettings.isFovConfigurable ? 'Field of view (in degrees) of the camera measured across the diagonal of the frame' : 'This setting is managed by a vendor'"
-              name="Diagonal FOV"
+              :tooltip="cameraSettings.isFovConfigurable ? 'Field of view (in degrees) of the camera measured across the diagonal of the frame, in a video mode which covers the whole sensor area.' : 'This setting is managed by a vendor'"
+              name="Maximum diagonal FOV"
               :disabled="!cameraSettings.isFovConfigurable"
             />
             <br>
@@ -260,7 +260,7 @@
           <v-dialog
             v-model="snack"
             width="500px"
-            persistent="true"
+            :persistent="true"
           >
             <v-card
               color="primary"
@@ -271,7 +271,7 @@
                 class="ml-3"
               >
                 <v-col align="center">
-                  <template v-if="calibrationInProgress">
+                  <template v-if="calibrationInProgress && !calibrationFailed">
                     <v-progress-circular
                       indeterminate
                       :size="70"
@@ -303,7 +303,7 @@
               <v-card-actions>
                 <v-spacer />
                 <v-btn
-                  v-if="!calibrationInProgress"
+                  v-if="!calibrationInProgress || calibrationFailed"
                   color="white"
                   text
                   @click="closeDialog"
@@ -340,7 +340,7 @@ export default {
             snack: false,
             calibrationInProgress: false,
             calibrationFailed: false,
-            filteredVideomodeIndex: undefined,
+            filteredVideomodeIndex: 0,
         }
     },
     computed: {

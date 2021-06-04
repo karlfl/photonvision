@@ -7,12 +7,14 @@ name: CI
 on:
   push:
     branches: [ master ]
+    tags:
+      - 'v*'
   pull_request:
     branches: [ master ]
 
 jobs:
   # This job builds the client (web view).
-  build-client:
+  photonclient-build:
 
     # Let all steps run within the photon-client dir.
     defaults:
@@ -47,12 +49,7 @@ jobs:
         name: built-client
         path: photon-client/dist/
 
-  build-server:
-    # Let all steps run within the photon-server dir.
-    defaults:
-      run:
-        working-directory: photon-server
-
+  photon-build-all:
     # The type of runner that the job will run on.
     runs-on: ubuntu-latest
 
@@ -60,6 +57,10 @@ jobs:
       # Checkout code.
       - name: Checkout code
         uses: actions/checkout@v1
+
+      # Fetch tags.
+      - name: Fetch tags
+        run: git fetch --tags --force
         
       # Install Java 11.
       - name: Install Java 11
@@ -78,12 +79,17 @@ jobs:
         run: ./gradlew jacocoTestReport
       
       # Publish Coverage Report.
-      - name: Publish Coverage Report
+      - name: Publish Server Coverage Report
         uses: codecov/codecov-action@v1
         with:
           file: ./photon-server/build/reports/jacoco/test/jacocoTestReport.xml
 
-  build-offline-docs:
+      - name: Publish Core Coverage Report
+        uses: codecov/codecov-action@v1
+        with:
+          file: ./photon-core/build/reports/jacoco/test/jacocoTestReport.xml
+
+  photonserver-build-offline-docs:
     runs-on: ubuntu-latest
 
     steps:
@@ -104,9 +110,6 @@ jobs:
           pip install sphinx sphinx_rtd_theme sphinx-tabs sphinxext-opengraph doc8
           pip install -r requirements.txt
           
-      - name: Install LaTeX and other system dependencies
-        run: sudo apt install -y texlive-latex-recommended texlive-fonts-recommended texlive-latex-extra latexmk texlive-lang-greek texlive-luatex texlive-xetex texlive-fonts-extra dvipng graphviz
-          
       - name: Check the docs
         run: |
           make linkcheck
@@ -121,77 +124,8 @@ jobs:
         with:
           name: built-docs
           path: build/html
-      
 
-  build-package:
-    needs: [build-client, build-server, build-offline-docs]
-
-    # Let all steps run within the photon-server dir.
-    defaults:
-      run:
-        working-directory: photon-server
-
-    # The type of runner that the job will run on.
-    runs-on: ubuntu-latest
-
-    steps:
-      # Checkout code.
-      - uses: actions/checkout@v1
-      
-      # Install Java 11.
-      - uses: actions/setup-java@v1
-        with:
-          java-version: 11
-
-      # Clear any existing web resources.
-      - run: |
-          rm -rf src/main/resources/web/*
-          mkdir -p src/main/resources/web/docs
-
-      # Download client artifact to resources folder.
-      - uses: actions/download-artifact@v2
-        with:
-          name: built-client
-          path: photon-server/src/main/resources/web/
-
-      # Download docs artifact to resources folder.
-      - uses: actions/download-artifact@v2
-        with:
-          name: built-docs
-          path: photon-server/src/main/resources/web/docs     
-
-
-      # Print folder contents.
-      - run: ls
-        working-directory: photon-server/src/main/resources/web/
-
-      # Build fat jar.
-      - run: |
-          chmod +x gradlew
-          ./gradlew shadowJar
-        working-directory: photon-server
-
-      # Upload final fat jar as artifact.
-      - uses: actions/upload-artifact@master
-        with:
-          name: jar
-          path: photon-server/build/libs
-    
-      - uses: eine/tip@master
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag: 'Dev'
-          rm: true
-          files: |
-            photon-server/build/libs/*.jar
-        if: github.event_name == 'push'
-
-  check-lint:
-    # Let all steps run within the photon-server dir.
-    defaults:
-      run:
-        working-directory: photon-server
-
+  photonserver-check-lint:
     # The type of runner that the job will run on.
     runs-on: ubuntu-latest
     
@@ -208,4 +142,161 @@ jobs:
       - run: |
           chmod +x gradlew
           ./gradlew spotlessCheck
-            
+
+  photon-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [photon-build-package]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v2
+        with:
+          name: jar
+      - uses: softprops/action-gh-release@v1
+        with:
+          files: '**/*'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  #  Building photonlib
+  photonlib-build-host:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact-name: Win64
+          - os: macos-latest
+            artifact-name: macOS
+          - os: ubuntu-latest
+            artifact-name: Linux
+
+    runs-on: ${{ matrix.os }}
+    name: "Photonlib - Build - ${{ matrix.artifact-name }}"
+    steps:
+      - uses: actions/checkout@v2.3.4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v1
+        with:
+          java-version: 11
+      - run: git fetch --tags --force
+      - run: |
+          chmod +x gradlew
+          ./gradlew photon-lib:build
+      - run: ./gradlew photon-lib:publish
+        name: Publish
+        env:
+          ARTIFACTORY_API_KEY: ${{ secrets.ARTIFACTORY_API_KEY }}
+        if: github.event_name == 'push'
+
+  photonlib-build-docker:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - container: wpilib/roborio-cross-ubuntu:2021-18.04
+            artifact-name: Athena
+          - container: wpilib/raspbian-cross-ubuntu:10-18.04
+            artifact-name: Raspbian
+          - container: wpilib/aarch64-cross-ubuntu:bionic-18.04
+            artifact-name: Aarch64
+
+    runs-on: ubuntu-latest
+    container: ${{ matrix.container }}
+    name: "Photonlib - Build - ${{ matrix.artifact-name }}"
+    steps:
+      - uses: actions/checkout@v2.3.4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v1
+        with:
+          java-version: 11
+      - run: |
+          git describe --tags --exclude="Dev"
+      - run: |
+          chmod +x gradlew
+          ./gradlew photon-lib:build
+      - run: |
+          chmod +x gradlew
+          ./gradlew photon-lib:publish
+        env:
+          ARTIFACTORY_API_KEY: ${{ secrets.ARTIFACTORY_API_KEY }}
+        if: github.event_name == 'push'
+
+  photonlib-wpiformat:
+    name: "wpiformat"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Fetch all history and metadata
+        run: |
+          git fetch --prune --unshallow
+          git checkout -b pr
+          git branch -f master origin/master
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+      - name: Install clang-format
+        run: sudo apt-get update -q && sudo apt-get install clang-format-10
+      - name: Install wpiformat
+        run: pip3 install wpiformat
+      - name: Run
+        run: |
+            ls -la
+            wpiformat -clang 10 -f photon-lib
+      - name: Check Output
+        run: git --no-pager diff --exit-code HEAD
+
+  photon-build-package:
+    needs: [photonclient-build, photon-build-all, photonserver-build-offline-docs, photonlib-build-host, photonlib-build-docker]
+
+    # The type of runner that the job will run on.
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout code.
+      - uses: actions/checkout@v1
+
+      # Install Java 11.
+      - uses: actions/setup-java@v1
+        with:
+          java-version: 11
+
+      # Clear any existing web resources.
+      - run: |
+          rm -rf photon-server/src/main/resources/web/*
+          mkdir -p photon-server/src/main/resources/web/docs
+
+      # Download client artifact to resources folder.
+      - uses: actions/download-artifact@v2
+        with:
+          name: built-client
+          path: photon-server/src/main/resources/web/
+
+      # Download docs artifact to resources folder.
+      - uses: actions/download-artifact@v2
+        with:
+          name: built-docs
+          path: photon-server/src/main/resources/web/docs
+
+      # Build fat jar.
+      - run: |
+          chmod +x gradlew
+          ./gradlew photon-server:shadowJar
+
+      # Upload final fat jar as artifact.
+      - uses: actions/upload-artifact@master
+        with:
+          name: jar
+          path: photon-server/build/libs
+
+      - uses: eine/tip@master
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: 'Dev'
+          rm: true
+          files: |
+            photon-server/build/libs/*.jar
+        if: github.event_name == 'push'
+
